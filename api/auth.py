@@ -27,6 +27,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 # 注册开关：公开服务时建议设为 false
 ALLOW_REGISTER = os.getenv("ALLOW_REGISTER", "true").lower() == "true"
 
+# 公开部署模式：开启后无有效 token 一律 401，必须登录
+PUBLIC_MODE = os.getenv("PUBLIC_MODE", "false").lower() == "true"
+
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 # auto_error=False：无 token 时不报错，由 get_current_user 决定如何处理
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
@@ -104,10 +107,11 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
-    """获取当前用户。无 token 时返回预设用户（取消登录模式）。
+    """获取当前用户。
 
-    保留 token 合法性校验：若传了 token 但无效，仍按未登录处理（返回预设用户），
-    而不是抛 401，这样前端无需登录即可访问所有接口。
+    - 带有效 token：返回对应登录用户
+    - 公开模式（PUBLIC_MODE=true）无有效 token：返回 401，必须登录
+    - 本地模式（PUBLIC_MODE=false）无 token：兜底返回预设用户（免登录）
     """
     if token:
         # 传了 token 就校验，合法则返回对应用户
@@ -121,7 +125,15 @@ async def get_current_user(
         except JWTError:
             pass  # token 无效，走下面的预设用户兜底
 
-    # 无 token 或 token 无效：返回预设用户
+    # 公开部署模式：无有效 token 一律拒绝，必须登录
+    if PUBLIC_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未登录或登录已失效，请先登录",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 本地模式：无 token 兜底返回预设用户（免登录）
     preset_user = os.getenv("PRESET_USER") or "111"
     user = get_user(db, preset_user)
     if user is None:
