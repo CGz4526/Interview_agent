@@ -817,6 +817,7 @@
         /* ========== 题库行列表（紧凑可展开） ========== */
         .q-list { display: flex; flex-direction: column; gap: 6px; }
         .q-row {
+            position: relative;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
@@ -824,9 +825,19 @@
             transition: border-color 0.15s, box-shadow 0.15s;
         }
         .q-row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
-        .q-row.is-starred { border-left: 3px solid var(--warning); }
+        /* 星标(黄)、模糊(紫)标记条：用伪元素实现，可并列显示且不改变卡片底色 */
+        .q-row.is-starred::before,
+        .q-row.is-vague::after {
+            content: "";
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 3px;
+        }
+        .q-row.is-starred::before { left: 0; background: var(--warning); }
+        .q-row.is-vague::after { left: 0; background: #6D28D9; }
+        /* 同时星标+模糊：紫色条让位到黄色条右侧，两者并列（黄在前） */
+        .q-row.is-starred.is-vague::after { left: 3px; }
         .q-row.is-confused { border-left: 3px solid var(--warning); background: var(--warning-light); }
-        .q-row.is-vague { border-left: 3px solid #6D28D9; background: #EDE9FE; }
         .q-row.expanded { border-color: var(--accent); box-shadow: 0 2px 8px rgba(79,70,229,0.08); }
 
         .q-row-head {
