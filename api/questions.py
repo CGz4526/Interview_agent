@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
-from db.models import Question, User, QuestionWeight
+from db.models import Question, User, QuestionWeight, QuestionProject, AnswerRecord
 from db.schemas import QuestionResponse, QuestionUpload, QuestionMarkConfused, QuestionCreate
 from db.database import get_db
 from api.auth import get_current_user
@@ -197,7 +197,8 @@ def upload_questions(upload: QuestionUpload, response: Response, db: Session = D
 @router.post("/ocr")
 async def ocr_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """从上传的图片提取文字。返回提取的文字内容，前端可编辑后提交解析。"""
-    if not file.content_type or not file.content_type.startswith('image/'):
+    # content_type 容错：部分移动端浏览器上传时 content_type 可能为空，放行
+    if file.content_type and not file.content_type.startswith('image/'):
         raise HTTPException(status_code=400, detail="请上传图片文件")
     image_bytes = await file.read()
     if len(image_bytes) > 10 * 1024 * 1024:
@@ -207,6 +208,10 @@ async def ocr_image(file: UploadFile = File(...), current_user: User = Depends(g
         text = extract_text_from_bytes(image_bytes)
     except ImportError:
         raise HTTPException(status_code=500, detail="OCR模块未安装，请运行 pip install paddleocr paddlepaddle")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"OCR处理失败：{str(e)}")
     if not text.strip():
         raise HTTPException(status_code=422, detail="未能从图片中识别到文字，请换一张更清晰的图片")
     return {"text": text}
