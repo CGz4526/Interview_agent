@@ -1,17 +1,12 @@
-"""OCR 模块：使用 PaddleOCR 2.x 从图片提取文字。
+"""OCR 模块：使用 RapidOCR (ONNX Runtime) 从图片提取文字。
 
-懒加载 PaddleOCR 实例（首次调用时初始化，避免启动卡顿）。
+RapidOCR 使用 PaddleOCR 同款模型但走 ONNX Runtime 推理，不依赖
+paddlepaddle，无需 AVX 指令集，内存占用约 300MB，适合轻量服务器。
 
-PaddleOCR 2.x API：
-- 创建实例：PaddleOCR(use_angle_cls=True, lang='ch')
-- 调用：ocr.ocr(image_path, cls=True) 返回 [[(box, (text, score)), ...]]
-- 必须设置 FLAGS_use_mkldnn=0 避免 paddlepaddle 2.6 兼容性问题
+API：
+- 创建实例：RapidOCR()
+- 调用：result, elapse = ocr(img_path) → result = [[box, text, score], ...]
 """
-
-import os
-
-# 必须在导入 paddle 前设置，禁用 oneDNN
-os.environ.setdefault('FLAGS_use_mkldnn', '0')
 
 _ocr_instance = None
 
@@ -19,34 +14,26 @@ _ocr_instance = None
 def _get_ocr():
     global _ocr_instance
     if _ocr_instance is None:
-        from paddleocr import PaddleOCR
-        # PaddleOCR 2.x：lang='ch' 中文，use_angle_cls=True 启用方向分类
-        _ocr_instance = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+        from rapidocr_onnxruntime import RapidOCR
+        _ocr_instance = RapidOCR()
     return _ocr_instance
 
 
 def _parse_result(result) -> str:
-    """从 PaddleOCR 2.x 的 ocr() 结果中提取文本。
+    """从 RapidOCR 结果中提取文本。
 
-    result 结构: [page_result] → page_result = [(box, (text, score)), ...]
+    result 结构: [[box, text, score], [box, text, score], ...] 或 None
     """
-    lines = []
     if not result:
         return ""
-    # 2.x 返回 [[(box, (text, score)), ...]]；第一层是页列表
-    for page in result:
-        if not page:
+    lines = []
+    for item in result:
+        # item = [box, text, score]
+        if not item or len(item) < 2:
             continue
-        for item in page:
-            # item = (box, (text, score))
-            if not item or len(item) < 2:
-                continue
-            text_info = item[1]
-            if not text_info or len(text_info) < 1:
-                continue
-            text = text_info[0]
-            if text and str(text).strip():
-                lines.append(str(text).strip())
+        text = item[1]
+        if text and str(text).strip():
+            lines.append(str(text).strip())
     return "\n".join(lines)
 
 
@@ -59,9 +46,8 @@ def extract_text_from_image(image_path: str) -> str:
     Returns:
         提取的文字内容，按行拼接
     """
-    # 不吞异常：让错误冒泡到 API 层，前端能看到具体原因
     ocr = _get_ocr()
-    result = ocr.ocr(image_path, cls=True)
+    result, elapse = ocr(image_path)
     return _parse_result(result)
 
 
@@ -76,7 +62,6 @@ def extract_text_from_bytes(image_bytes: bytes) -> str:
     """
     import tempfile
     import os
-    # 写入临时文件（PaddleOCR 需要文件路径）
     with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
         f.write(image_bytes)
         tmp_path = f.name
@@ -87,4 +72,3 @@ def extract_text_from_bytes(image_bytes: bytes) -> str:
             os.unlink(tmp_path)
         except Exception:
             pass
-
